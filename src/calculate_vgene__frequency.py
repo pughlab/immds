@@ -1,7 +1,9 @@
 import os, sys
+from bson import ObjectId
 from pymongo import MongoClient
 from optparse import OptionParser
 from threading import Thread
+
 
 def get_options():
     """
@@ -159,6 +161,16 @@ def get_all_samples_by_study(db, study_id):
             '$match': {"patient.study_id": study_id}
         }])
 
+def add_vgene_frequency(db, arg_dict, study_id):
+    if study_id == "TLML":
+        result = db.TLML_frequency.insert_one(arg_dict)
+        return result.inserted_id
+    elif study_id == 'TRAGET':
+        result = db.TARGET_frequency.insert_one(arg_dict)
+        result.inserted_id
+    else:
+        return None
+
 def calculate_frequency(db, filename, chains, sample_size, study_id):
     """
         calculate the frequency of vgenes over of given sample size
@@ -174,27 +186,27 @@ def calculate_frequency(db, filename, chains, sample_size, study_id):
         :type: study_id: str
         :return: None
     """
-    with open(filename, 'w') as of:
-        for chain_id in chains:
-            v_gene = chain_id["_id"]["VGene"].strip()
-            aa_seq = chain_id["_id"]["aaSeqCDR3"].strip()
-            n_seq = chain_id["_id"]["nSeqCDR3"].strip()
+    for chain_id in chains:
+        v_gene = chain_id["_id"]["VGene"].strip()
+        aa_seq = chain_id["_id"]["aaSeqCDR3"].strip()
+        n_seq = chain_id["_id"]["nSeqCDR3"].strip()
 
-            sample_query = get_chains_by_vgene_and_aaSeqCDR3(db, v_gene, aa_seq, study_id)
-            sample_ids= list(set([ c["sample"]["_id"] for c in sample_query ]))
-            print("sample IDs: %s" %str(sample_ids))
+        sample_query = get_chains_by_vgene_and_aaSeqCDR3(db, v_gene, aa_seq, study_id)
+        sample_ids= list(set([ c["sample"]["_id"] for c in sample_query ]))
+        print("sample IDs: %s" %str(sample_ids))
 
-            count = len(sample_ids)
-            if count > 1: print (count)
-            one_dic = dict( _id=v_gene.split(",")[0],
-                            aaSeqCDR3 = aa_seq,
-                            sSeqCDR3 = n_seq,
-                            count=str(count),
-                            sample_size=str(sample_size),
-                            sample_ids = sample_ids
-                            )
-            of.write("db.%s_frequency.insert(%s)\n"%(study_id, str(one_dic)))
-
+        count = len(sample_ids)
+        if count > 1: print (count)
+        one_dic = dict( _id= str(ObjectId()),
+                        VGene = v_gene.split(",")[0],
+                        aaSeqCDR3 = aa_seq,
+                        sSeqCDR3 = n_seq,
+                        count=str(count),
+                        sample_size=str(sample_size),
+                        sample_ids = sample_ids
+                        )
+        row_id = add_vgene_frequency(db,one_dic, "TLML")
+        print ("row id: %s"%row_id)
 def main():
     options = get_options()
     print (options)
@@ -207,18 +219,16 @@ def main():
     chain_query = get_unique_vgenes_by_study(db, options.study_id)
     chains = [ one_chain for one_chain in chain_query ]
     chain_size = len(chains)
-    print (chain_size)
+    print ("total records: %s" %chain_size)
     chains_list = list(range(0, len(chains) + 1, 256))
-    print (chains_list)
+
     idx0 = chains_list[0]
     for x in chains_list[1:]:
-        print (idx0, x)
         t = Thread(target=calculate_frequency, args=[db, os.path.join(options.output,
                                                         "%s_%s.js"%(options.filename, idx0)),
                                                         chains[idx0:x], sample_size, options.study_id])
         t.start()
         idx0 = x
-    print(idx0, chain_size-1)
     t = Thread(target=calculate_frequency, args=[db, os.path.join(options.output,
                                                                   "%s.js" % (options.filename)),
                                                  chains[idx0:chain_size-1], sample_size, options.study_id])
