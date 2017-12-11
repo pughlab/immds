@@ -212,7 +212,7 @@ def calculate_frequency(db, logger, chains, sample_size, study_id):
             one_dic = dict( _id= str(ObjectId()),
                             VGene = v_gene.split(",")[0],
                             aaSeqCDR3 = aa_seq,
-                            sSeqCDR3 = n_seq,
+                            nSeqCDR3 = n_seq,
                             count=str(count),
                             sample_size=str(sample_size),
                             sample_ids = sample_ids
@@ -231,14 +231,14 @@ def main():
     try:
         db = get_db(options.hostname, 27017)
     except Exception as e:
-        logger.error("can not connect to mongodb: %s" %e.message)
+        logger.error("cannot connect to mongodb: %s" %e.message)
 
     try:
         sample_query = get_all_samples_by_study(db, options.study_id)
         sample_size = len([str(s) for s in sample_query])
         logger.info("sample size: %s" % sample_size)
     except Exception as e:
-        logger.error("can not retrieve samples for %s: %s"%(options.study_id, e.message))
+        logger.error("cannot retrieve samples for %s: %s"%(options.study_id, e.message))
 
     try:
         chain_query = get_unique_vgenes_by_study(db, options.study_id)
