@@ -46,6 +46,12 @@ def get_options():
                       type="string",
                       help="id of study e.g TARGET"
                       )
+    parser.add_option('-c', '--cancer_type_id',
+                      dest="cancer_type_id",
+                      type="string",
+                      default=None,
+                      help="id of cancer type e.g NBL"
+                      )
     (options, args) = parser.parse_args()
     return options
 
@@ -237,7 +243,7 @@ def add_vgene_frequency(db, arg_dict, study_id):
     else:
         return None
 
-def calculate_frequency(db, logger, chains, sample_size, study_id):
+def calculate_frequency(db, logger, chains, sample_size, study_id, cancer_type_id):
     """
         calculate the frequency of vgenes over of given sample size
         :param db: database handler
@@ -258,7 +264,7 @@ def calculate_frequency(db, logger, chains, sample_size, study_id):
             aa_seq = chain_id["_id"]["aaSeqCDR3"].strip()
             n_seq = chain_id["_id"]["nSeqCDR3"].strip()
 
-            sample_query = get_chains_by_vgene_and_aaSeqCDR3(db, v_gene, aa_seq, study_id)
+            sample_query = get_chains_by_vgene_and_aaSeqCDR3(db, v_gene, aa_seq, study_id, cancer_type_id)
             sample_ids= list(set([ c["sample"]["_id"] for c in sample_query ]))
             logger.info("sample IDs: %s" %str(sample_ids))
 
@@ -293,17 +299,20 @@ def get_vgene_frequency(db, logger, study_id, VGene, count=None):
         :return counts of VGene of interest
         :rtype list
     """
-    regx = re.compile("%s.*"%VGene, re.IGNORECASE)
-    if study_id == "TLML":
-        if count:
-            return db.TLML_frequency.find({"VGene": regx, "count":{'$gte': count}})
-        else:
-            return db.TLML_frequency.find({"VGene": regx})
-    elif study_id == "TRAGET":
-        if count:
-            return db.TRAGET_frequency.find({"VGene": regx, "count": {'$gte': count}})
-        else:
-            return db.TRAGET_frequency.find({"VGene": regx})
+    try:
+        regx = re.compile("%s.*"%VGene, re.IGNORECASE)
+        if study_id == "TLML":
+            if count:
+                return db.TLML_frequency.find({"VGene": regx, "count":{'$gte': count}})
+            else:
+                return db.TLML_frequency.find({"VGene": regx})
+        elif study_id == "TRAGET":
+            if count:
+                return db.TRAGET_frequency.find({"VGene": regx, "count": {'$gte': count}})
+            else:
+                return db.TRAGET_frequency.find({"VGene": regx})
+    except Exception as e:
+        logger.error("failed to get frequency for %s: %s" %(VGene, e.message))
 
 def main():
     options = get_options()
@@ -316,7 +325,7 @@ def main():
         logger.error("cannot connect to mongodb: %s" %e.message)
 
     try:
-        sample_query = get_all_samples_by_study(db, options.study_id)
+        sample_query = get_all_samples_by_study(db, options.study_id, options.cancer_type_id)
         sample_size = len([str(s) for s in sample_query])
         logger.info("sample size: %s" % sample_size)
     except Exception as e:
@@ -333,10 +342,12 @@ def main():
 
     idx0 = chains_list[0]
     for x in chains_list[1:]:
-        t = Thread(target=calculate_frequency, args=[db, logger, chains[idx0:x], sample_size, options.study_id])
+        t = Thread(target=calculate_frequency, args=[db, logger, chains[idx0:x], sample_size,
+                                                     options.study_id, options.cancer_type_id])
         t.start()
         idx0 = x
-    t = Thread(target=calculate_frequency, args=[db, logger, chains[idx0:chain_size], sample_size, options.study_id])
+    t = Thread(target=calculate_frequency, args=[db, logger, chains[idx0:chain_size], sample_size,
+                                                 options.study_id, options.cancer_type_id])
     t.start()
 
 if __name__ == "__main__":
