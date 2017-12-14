@@ -1,4 +1,6 @@
-import os, sys
+import os
+import sys
+import re
 from bson import ObjectId
 from pymongo import MongoClient
 from optparse import OptionParser
@@ -88,49 +90,84 @@ def get_unique_vgenes_by_study(db, study_id):
     else:
         return None
 
-def get_chains_by_vgene_and_aaSeqCDR3(db, vgene, aaSeqCDR3, study_id):
+def get_chains_by_vgene_and_aaSeqCDR3(db, vgene, aaSeqCDR3, study_id, cancer_type_id=None):
     """
         query chain collect for a list of chains of interest
         :param db: database handler
         :param aaSeqCDR3: aminino acid seequence of interest
         :param study_id: cancer study ID
+        :param cancer_type_id: cancer type ID eg NBL
         :type db: object
         :type aaSeqCDR3: str
-        :type: study_id: str
+        :type study_id: str
+        :type cancer_type_id: str
         :return: a list of chains of interest
         :rtype: list
     """
-    pipeline = [
-        {'$lookup':
+    if cancer_type_id:
+        pipeline = [
+            {'$lookup':
+                {
+                    'from': "assay",
+                    'localField': "assay_id",
+                    'foreignField': "_id",
+                    'as': "assay"
+                }
+            },
+            {'$unwind': "$assay"},
+            {'$lookup':
+                {
+                    'from': "sample",
+                    'localField': "assay.sample_id",
+                    'foreignField': "_id",
+                    'as': "sample"
+                }
+            },
+            {'$unwind': "$sample"},
+            {'$lookup':
+                {
+                    'from': "patient",
+                    'localField': "sample.patient_id",
+                    'foreignField': "_id",
+                    'as': "patient"
+                }
+            },
+            {'$unwind': "$patient"},
             {
-                'from': "assay",
-                'localField': "assay_id",
-                'foreignField': "_id",
-                'as': "assay"
-            }
-        },
-        {'$unwind': "$assay"},
-        {'$lookup':
+                '$match': {"VGene": vgene, "aaSeqCDR3": aaSeqCDR3, "sample.cancer_type_id": cancer_type_id}
+            }]
+    else:
+        pipeline = [
+            {'$lookup':
+                {
+                    'from': "assay",
+                    'localField': "assay_id",
+                    'foreignField': "_id",
+                    'as': "assay"
+                }
+            },
+            {'$unwind': "$assay"},
+            {'$lookup':
+                {
+                    'from': "sample",
+                    'localField': "assay.sample_id",
+                    'foreignField': "_id",
+                    'as': "sample"
+                }
+            },
+            {'$unwind': "$sample"},
+            {'$lookup':
+                {
+                    'from': "patient",
+                    'localField': "sample.patient_id",
+                    'foreignField': "_id",
+                    'as': "patient"
+                }
+            },
+            {'$unwind': "$patient"},
             {
-                'from': "sample",
-                'localField': "assay.sample_id",
-                'foreignField': "_id",
-                'as': "sample"
-            }
-        },
-        {'$unwind': "$sample"},
-        {'$lookup':
-            {
-                'from': "patient",
-                'localField': "sample.patient_id",
-                'foreignField': "_id",
-                'as': "patient"
-            }
-        },
-        {'$unwind': "$patient"},
-        {
-            '$match': {"VGene": vgene, "aaSeqCDR3": aaSeqCDR3}
-        }]
+                '$match': {"VGene": vgene, "aaSeqCDR3": aaSeqCDR3}
+            }]
     if study_id == "TARGET":
         return db.TARGET.aggregate(pipeline)
     elif study_id == "TLML":
@@ -138,17 +175,34 @@ def get_chains_by_vgene_and_aaSeqCDR3(db, vgene, aaSeqCDR3, study_id):
     else:
         return None
 
-def get_all_samples_by_study(db, study_id):
+def get_all_samples_by_study(db, study_id, cancer_type_id=None):
     """
         query sampe collect for a given study ID
         :param db: database handler
         :param study_id: cancer study ID
+        :param cancer_type_id: ID of cancer type eg NBL
         :type db: object
         :type: study_id: str
+        :type: cancer_study_id: str
         :return: a list of samples of interest
         :rtype: list
     """
-    return db.sample.aggregate([
+    if cancer_type_id:
+        return db.sample.aggregate([
+        {'$lookup':
+            {
+                'from': "patient",
+                'localField': "patient_id",
+                'foreignField': "_id",
+                'as': "patient"
+            }
+        },
+        {'$unwind': "$patient"},
+        {
+            '$match': {"patient.study_id": study_id, "cancer_type_id": cancer_type_id}
+        }])
+    else:
+        return db.sample.aggregate([
         {'$lookup':
             {
                 'from': "patient",
@@ -222,6 +276,34 @@ def calculate_frequency(db, logger, chains, sample_size, study_id):
         except Exception as e:
             logger.error("error occurs while calculating frequency: %s" %e.message)
             continue
+
+def get_vgene_frequency(db, logger, study_id, VGene, count=None):
+    """
+        retrieve the frequency for a VGene of interst
+        :param db: database handler
+        :param logger: logger object
+        :param study_id: study ID eg. TARGET
+        :param VGene: VGene of interest
+        :param count: number of counts
+        :type db: object
+        :type logger: object
+        :type study_id: str
+        :type VGene: str
+        :type count: int
+        :return counts of VGene of interest
+        :rtype list
+    """
+    regx = re.compile("%s.*"%VGene, re.IGNORECASE)
+    if study_id == "TLML":
+        if count:
+            return db.TLML_frequency.find({"VGene": regx, "count":{'$gte': count}})
+        else:
+            return db.TLML_frequency.find({"VGene": regx})
+    elif study_id == "TRAGET":
+        if count:
+            return db.TRAGET_frequency.find({"VGene": regx, "count": {'$gte': count}})
+        else:
+            return db.TRAGET_frequency.find({"VGene": regx})
 
 def main():
     options = get_options()
